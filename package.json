@@ -1,0 +1,17 @@
+{
+  "name": "bento-order-system",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "tsc",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "hono": "^4.6.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240919.0",
+    "typescript": "^5.5.0",
+    "wrangler": "^3.78.0"
+  }
+}

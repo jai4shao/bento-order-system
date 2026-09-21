@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>便當系統 - 管理後台與核銷</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-100 min-h-screen text-slate-800 p-3 sm:p-6 md:p-8">
+  <div class="max-w-4xl mx-auto space-y-5">
+
+    <!-- 頂部卡片 -->
+    <header class="bg-white rounded-2xl p-4 sm:p-6 shadow-sm border border-slate-200 flex flex-col sm:flex-row justify-between sm:items-center gap-3">
+      <div>
+        <div class="flex items-center space-x-2">
+          <h1 class="text-xl sm:text-2xl font-bold text-slate-800">📋 便當核銷與叫餐後台</h1>
+          <span id="lockStatusBadge" class="text-xs font-bold px-2.5 py-1 rounded-full border">載入中...</span>
+        </div>
+        <p class="text-xs text-slate-500 mt-1">電話下單後請截止點餐；收款支援手機卡片對帳與大鈔找零校正</p>
+      </div>
+      <div class="flex items-center flex-wrap gap-2">
+        <button id="toggleLockBtn" onclick="toggleOrderLock()" class="text-xs font-bold px-3.5 py-2 rounded-xl border shadow-sm transition">
+          切換狀態中...
+        </button>
+        <a href="/" class="text-xs font-semibold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 px-3 py-2 rounded-xl border border-slate-200 transition">回前台</a>
+        <a href="/store_admin" class="text-xs font-semibold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 px-3 py-2 rounded-xl border border-slate-200 transition">店家管理</a>
+        <button onclick="resetAllOrders()" class="text-xs font-semibold text-red-600 hover:text-red-800 bg-red-50 hover:bg-red-100 px-3 py-2 rounded-xl border border-red-200 transition">清空訂單</button>
+      </div>
+    </header>
+
+    <!-- 1. 叫餐統計區塊 -->
+    <section class="bg-white rounded-2xl p-4 sm:p-6 shadow-sm border border-slate-200 space-y-4">
+      <div class="flex justify-between items-center border-b pb-3">
+        <div>
+          <h2 class="text-base sm:text-lg font-bold text-slate-800">📊 店家叫餐報單統計</h2>
+          <p class="text-xs text-slate-500 mt-0.5">依店家分卡展示，合併叫餐自動歸納為分袋清單</p>
+        </div>
+        <span class="text-xs bg-blue-50 text-blue-700 font-bold px-3 py-1 rounded-full border border-blue-100" id="totalSummaryAmount">全單總額：$0</span>
+      </div>
+
+      <!-- 一般店家叫餐卡片容器 -->
+      <div id="storeCallCardsContainer" class="space-y-3">
+        <p class="text-slate-400 py-4 text-center text-sm">載入叫餐統計中...</p>
+      </div>
+
+      <!-- 合併點餐專用叫餐區 -->
+      <div id="bundledStoresContainer" class="space-y-3 pt-2"></div>
+    </section>
+
+    <!-- 2. 個人對帳核銷區塊 (手機卡片化排版) -->
+    <section class="bg-white rounded-2xl p-4 sm:p-6 shadow-sm border border-slate-200 space-y-4">
+      <div class="flex flex-col sm:flex-row justify-between sm:items-center gap-1 border-b pb-3">
+        <div>
+          <h2 class="text-base sm:text-lg font-bold text-slate-800">🧾 個人對帳與找零核銷</h2>
+          <p class="text-xs text-slate-500 mt-0.5">點擊卡片展開點購明細；拿大鈔找零後點擊打勾自動校正實收</p>
+        </div>
+        <div id="userCollectProgress" class="text-xs font-bold text-slate-600 bg-slate-50 px-2.5 py-1 rounded-lg border border-slate-200 self-start sm:self-auto">
+          收款進度：計算中...
+        </div>
+      </div>
+
+      <!-- 手機友善卡片名單容器 -->
+      <div id="userCardsList" class="space-y-3">
+        <p class="text-slate-400 py-6 text-center text-sm">載入對帳名單中...</p>
+      </div>
+    </section>
+
+  </div>
+
+  <!-- 修改訂單彈窗 Modal -->
+  <div id="editModal" class="fixed inset-0 bg-black/40 backdrop-blur-sm hidden flex items-center justify-center p-4 z-50">
+    <div class="bg-white rounded-2xl shadow-xl max-w-md w-full p-5 space-y-4">
+      <div class="flex justify-between items-center border-b pb-3">
+        <div>
+          <h3 class="text-base font-bold text-slate-800">修改餐點品項</h3>
+          <p id="modalStoreIndicator" class="text-xs text-blue-600 font-bold mt-0.5"></p>
+        </div>
+        <button onclick="closeEditModal()" class="text-slate-400 hover:text-slate-600 text-xl font-bold">&times;</button>
+      </div>
+      <div class="space-y-3 text-xs">
+        <div>
+          <label class="block font-semibold text-slate-700 mb-1">點餐人</label>
+          <input type="text" id="modalUserName" disabled class="w-full bg-slate-100 border border-slate-200 rounded-xl px-3 py-2 text-slate-500">
+        </div>
+        <div>
+          <label class="block font-semibold text-slate-700 mb-1">更換該店家品項</label>
+          <select id="modalMenuSelect" onchange="onModalMenuChange()" class="w-full border border-slate-300 rounded-xl px-3 py-2 bg-slate-50 focus:bg-white outline-none focus:ring-2 focus:ring-blue-500 text-xs"></select>
+        </div>
+        <div>
+          <label class="block font-semibold text-slate-700 mb-1">金額 ($)</label>
+          <input type="number" id="modalPrice" class="w-full border border-slate-300 rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500 font-bold text-slate-700">
+        </div>
+        <div>
+          <label class="block font-semibold text-slate-700 mb-1">備註需求</label>
+          <input type="text" id="modalNote" placeholder="微糖微冰、飯少等" class="w-full border border-slate-300 rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500">
+        </div>
+      </div>
+      <div class="flex justify-end space-x-2 pt-3 border-t">
+        <button onclick="closeEditModal()" class="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition">取消</button>
+        <button onclick="saveOrderEdit()" class="px-4 py-2 text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow transition">儲存更新</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let rawOrders = [];
+    let availableMenuItems = [];
+    let allStoresList = [];
+    let activeEditingOrderId = null;
+    let isCurrentlyLocked = false;
+    let expandedUsers = {}; // 追蹤哪些卡片展開明細
+
+    async function loadAdminData() {
+      try {
+        const [initRes, sumRes, ordRes, statusRes] = await Promise.all([
+          fetch('/api/init-order-page'),
+          fetch('/api/admin/summary'),
+          fetch('/api/admin/orders'),
+          fetch('/api/system/status')
+        ]);
+        const initJson = await initRes.json();
+        const sumJson = await sumRes.json();
+        const ordJson = await ordRes.json();
+        const statusJson = await statusRes.json();
+
+        availableMenuItems = (initJson.data && initJson.data.menuItems) ? initJson.data.menuItems : [];
+        allStoresList = (initJson.data && initJson.data.stores) ? initJson.data.stores : [];
+        rawOrders = ordJson.data || [];
+        isCurrentlyLocked = statusJson.isLocked || false;
+
+        renderLockStatus();
+        renderStoreCallCards(sumJson.data || []);
+        renderBundledStoreOrders(rawOrders);
+        renderUserCards(rawOrders);
+      } catch (e) {
+        console.error(e);
+        document.getElementById('storeCallCardsContainer').innerHTML = '<p class="text-red-500 py-4 text-center text-sm">載入資料失敗</p>';
+      }
+    }
+
+    function renderLockStatus() {
+      const badge = document.getElementById('lockStatusBadge');
+      const btn = document.getElementById('toggleLockBtn');
+
+      if (isCurrentlyLocked) {
+        badge.innerText = '🔴 已結單 (已截止)';
+        badge.className = 'text-xs font-bold px-2.5 py-1 rounded-full border bg-red-50 text-red-700 border-red-200';
+        btn.innerText = '🔓 重新開放點餐';
+        btn.className = 'text-xs font-bold px-3.5 py-2 rounded-xl border bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-600 shadow-sm transition';
+      } else {
+        badge.innerText = '🟢 開放登記中';
+        badge.className = 'text-xs font-bold px-2.5 py-1 rounded-full border bg-emerald-50 text-emerald-700 border-emerald-200';
+        btn.innerText = '🔒 截止點餐 (已下單)';
+        btn.className = 'text-xs font-bold px-3.5 py-2 rounded-xl border bg-red-600 hover:bg-red-700 text-white border-red-600 shadow-sm transition';
+      }
+    }
+
+    async function toggleOrderLock() {
+      const targetState = !isCurrentlyLocked;
+      const confirmText = targetState 
+        ? '確定要「截止點餐」嗎？\n截止後前台將無法送出點餐、也無法自己取消或修改餐點。' 
+        : '確定要「重新開放點餐」嗎？';
+      
+      if (!confirm(confirmText)) return;
+
+      const res = await fetch('/api/admin/toggle-lock', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isLocked: targetState })
+      });
+      const json = await res.json();
+      if (json.success) {
+        isCurrentlyLocked = targetState;
+        renderLockStatus();
+        alert(json.message);
+      } else {
+        alert(json.message || '操作失敗');
+      }
+    }
+
+    function isBundledCategory(cat) {
+      if (!cat) return false;
+      const c = cat.toLowerCase();
+      return c.includes('合併點餐') || c.includes('滷味') || c.includes('炸物') || c.includes('車輪餅') || c.includes('點心');
+    }
+
+    // 1. 叫餐報單區
+    function renderStoreCallCards(summary) {
+      const container = document.getElementById('storeCallCardsContainer');
+      let grandTotal = 0;
+
+      if (!summary || summary.length === 0) {
+        container.innerHTML = '<p class="text-slate-400 py-4 text-center text-sm">目前無訂單統計資料</p>';
+        document.getElementById('totalSummaryAmount').innerText = '全單總額：$0';
+        return;
+      }
+
+      summary.forEach(s => grandTotal += (s.subtotal || 0));
+      document.getElementById('totalSummaryAmount').innerText = '全單總額：$' + grandTotal;
+
+      const storeMetaMap = {};
+      allStoresList.forEach(st => storeMetaMap[st.name] = st);
+
+      const storeGroups = {};
+      summary.forEach(row => {
+        const storeName = row.store_name || '未指定店家';
+        const stMeta = storeMetaMap[storeName];
+
+        if (stMeta && isBundledCategory(stMeta.category)) return;
+
+        if (!storeGroups[storeName]) {
+          storeGroups[storeName] = {
+            storeName: storeName,
+            phone: stMeta ? stMeta.phone : '',
+            category: stMeta ? stMeta.category : '便當',
+            items: [],
+            totalQty: 0,
+            totalAmount: 0
+          };
+        }
+
+        storeGroups[storeName].items.push(row);
+        storeGroups[storeName].totalQty += Number(row.qty || 0);
+        storeGroups[storeName].totalAmount += Number(row.subtotal || 0);
+      });
+
+      const storeKeys = Object.keys(storeGroups);
+      if (storeKeys.length === 0) {
+        container.innerHTML = '<div class="bg-slate-50 border border-slate-200 rounded-xl p-3 text-center text-slate-400 text-xs">目前無便當/飲料類餐點（所有餐點均屬下方合併分袋清單）</div>';
+        return;
+      }
+
+      let html = '';
+      storeKeys.forEach(sName => {
+        const group = storeGroups[sName];
+        const isDrink = group.category === '飲料';
+        const badgeColor = isDrink ? 'bg-purple-50 text-purple-700 border-purple-200' : 'bg-blue-50 text-blue-700 border-blue-200';
+
+        html += `
+          <div class="bg-slate-50 border border-slate-200 rounded-xl p-3 sm:p-4 space-y-2.5">
+            <div class="flex flex-col sm:flex-row justify-between sm:items-center gap-1.5 border-b border-slate-200 pb-2">
+              <div class="flex items-center space-x-2">
+                <span class="text-sm sm:text-base font-bold text-slate-800">${group.storeName}</span>
+                <span class="text-[10px] font-bold px-2 py-0.5 rounded border ${badgeColor}">${group.category}</span>
+                ${group.phone ? `<span class="text-xs text-slate-500 font-mono">📞 ${group.phone}</span>` : ''}
+              </div>
+              <div class="flex items-center space-x-2 text-xs">
+                <span class="font-bold text-slate-600 bg-white border border-slate-200 px-2 py-0.5 rounded-md">共 ${group.totalQty} 份</span>
+                <span class="font-bold text-blue-700 bg-blue-100/70 border border-blue-200 px-2 py-0.5 rounded-md">小計：$${group.totalAmount}</span>
+              </div>
+            </div>
+
+            <table class="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr class="text-slate-400 border-b border-slate-200">
+                  <th class="py-1 px-1.5">品項名稱</th>
+                  <th class="py-1 px-1.5">規格 / 備註</th>
+                  <th class="py-1 px-1.5 text-center w-14">數量</th>
+                  <th class="py-1 px-1.5 text-right w-16">小計</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-200/60">
+                ${group.items.map(it => `
+                  <tr class="hover:bg-white/60 transition">
+                    <td class="py-1.5 px-1.5 font-bold text-slate-800">${it.item_name}</td>
+                    <td class="py-1.5 px-1.5 text-slate-600 font-medium">${it.note || '-'}</td>
+                    <td class="py-1.5 px-1.5 text-center font-bold text-slate-800 text-sm">${it.qty}</td>                     <td class="py-1.5 px-1.5 text-right font-bold text-slate-700">$${it.subtotal}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        `;
+      });
+      container.innerHTML = html;
+    }
+
+    // 2. 合併點餐分袋打包專區
+    function renderBundledStoreOrders(orders) {
+      const container = document.getElementById('bundledStoresContainer');
+      container.innerHTML = '';
+
+      const bundledStores = allStoresList.filter(s => isBundledCategory(s.category));
+      if (bundledStores.length === 0) return;
+
+      bundledStores.forEach(s => {
+        const storeOrders = orders.filter(o => o.store_name === s.name);
+        if (storeOrders.length === 0) return;
+
+        let storeTotal = 0;
+        const userBags = {};
+        storeOrders.forEach(o => {
+          storeTotal += Number(o.price || 0);
+          if (!userBags[o.user_name]) {
+            userBags[o.user_name] = { userName: o.user_name, items: {}, bagTotal: 0 };
+          }
+          userBags[o.user_name].bagTotal += Number(o.price || 0);
+          const key = o.item_name + (o.note ? ` (${o.note})` : '');
+          userBags[o.user_name].items[key] = (userBags[o.user_name].items[key] || 0) + 1;
+        });
+
+        let bagsHtml = `
+          <div class="bg-amber-50/70 border border-amber-200 rounded-xl p-3 sm:p-4 space-y-2.5">
+            <div class="flex flex-col sm:flex-row justify-between sm:items-center gap-1.5 border-b border-amber-200 pb-2">
+              <div class="flex items-center space-x-2">
+                <span class="text-sm sm:text-base font-bold text-amber-900 flex items-center gap-1">
+                  <span>🛍️</span> <span>[${s.name}] 個人分袋叫餐清單</span>
+                </span>
+                ${s.phone ? `<span class="text-xs text-amber-700 font-mono">📞 ${s.phone}</span>` : ''}
+              </div>
+              <div class="flex items-center space-x-2 text-xs">
+                <span class="font-bold text-amber-800 bg-amber-100 border border-amber-300 px-2 py-0.5 rounded-md">共 ${Object.keys(userBags).length} 袋</span>
+                <span class="font-bold text-amber-900 bg-amber-200/80 border border-amber-300 px-2 py-0.5 rounded-md">店家合計：$${storeTotal}</span>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 text-xs pt-1">
+        `;
+
+        Object.values(userBags).forEach((bag, idx) => {
+          const itemListStr = Object.entries(bag.items).map(([name, qty]) => `${name} × ${qty}`).join('、');
+          bagsHtml += `
+            <div class="bg-white border border-amber-200 rounded-xl p-2.5 space-y-1 shadow-2xs">
+              <div class="flex justify-between items-center font-bold text-slate-800 border-b border-slate-100 pb-1">
+                <span>袋子 #${idx + 1}：${bag.userName}</span>
+                <span class="text-amber-700">$${bag.bagTotal}</span>
+              </div>
+              <p class="text-slate-600 text-[11px] leading-relaxed">${itemListStr}</p>
+            </div>
+          `;
+        });
+
+        bagsHtml += '</div></div>';
+        container.innerHTML += bagsHtml;
+      });
+    }
+
+    // 3. 手機卡片化個人核銷清單
+    function renderUserCards(orders) {
+      const container = document.getElementById('userCardsList');
+      if (!orders || orders.length === 0) {
+        container.innerHTML = '<p class="text-slate-400 py-6 text-center text-sm">目前尚無點餐紀錄</p>';
+        document.getElementById('userCollectProgress').innerText = '無點餐紀錄';
+        return;
+      }
+
+      const usersMap = {};
+      orders.forEach(o => {
+        if (!usersMap[o.user_name]) {
+          usersMap[o.user_name] = {
+            userName: o.user_name,
+            totalPrice: 0,
+            paidAmount: Number(o.paid_amount || 0),
+            isAllPaid: true,
+            items: []
+          };
+        }
+        usersMap[o.user_name].totalPrice += Number(o.price || 0);
+        if (!o.is_paid) usersMap[o.user_name].isAllPaid = false;
+        usersMap[o.user_name].items.push(o);
+      });
+
+      const userList = Object.values(usersMap);
+
+      // 計算收款統計
+      let totalPaidCount = 0;
+      userList.forEach(u => { if (u.isAllPaid) totalPaidCount++; });
+      document.getElementById('userCollectProgress').innerHTML = `
+        收款進度：<span class="${totalPaidCount === userList.length ? 'text-emerald-600 font-bold' : 'text-blue-600 font-bold'}">${totalPaidCount} / ${userList.length} 人結清</span>
+      `;
+
+      let html = '';
+      userList.forEach((u, idx) => {
+        const isExpanded = !!expandedUsers[u.userName];
+        const isPaid = u.isAllPaid;
+        const paidAmount = u.paidAmount;
+        const change = (paidAmount > 0) ? (paidAmount - u.totalPrice) : 0;
+
+        // 卡片外框與狀態標籤
+        let statusBadge = '';
+        let cardBorder = isPaid ? 'border-emerald-200 bg-emerald-50/30' : 'border-slate-200 bg-white';
+
+        if (isPaid) {
+          statusBadge = '<span class="text-[11px] font-bold text-emerald-700 bg-emerald-100 border border-emerald-300 px-2 py-0.5 rounded-full">✓ 已結清</span>';
+        } else if (paidAmount > u.totalPrice) {
+          statusBadge = `<span class="text-[11px] font-bold text-amber-800 bg-amber-100 border border-amber-300 px-2 py-0.5 rounded-full">需找 $${change}</span>`;
+        } else {
+          statusBadge = '<span class="text-[11px] font-bold text-slate-500 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-full">未付款</span>';
+        }
+
+        html += `
+          <div class="border rounded-2xl p-3.5 shadow-2xs transition space-y-3 ${cardBorder}">
+            
+            <!-- 卡片上層：點擊展開明細 -->
+            <div class="flex items-center justify-between cursor-pointer select-none" onclick="toggleUserExpand('${u.userName}')">
+              <div class="flex items-center space-x-2.5">
+                <span class="text-sm sm:text-base font-bold text-slate-800">${u.userName}</span>
+                <span class="text-xs text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md font-medium">${u.items.length} 份</span>
+                ${statusBadge}
+              </div>
+              <div class="flex items-center space-x-2">
+                <span class="text-base sm:text-lg font-bold ${isPaid ? 'text-emerald-700' : 'text-slate-800'}">$${u.totalPrice}</span>
+                <span class="text-slate-400 text-xs transform transition-transform ${isExpanded ? 'rotate-180' : ''}">▼</span>
+              </div>
+            </div>
+
+            <!-- 卡片中層：收錢與找零操作區 (專為手機觸控優化) -->
+            <div class="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100 text-xs">
+              <div class="flex items-center space-x-2">
+                <span class="text-slate-500 font-semibold">實收：$</span>
+                <input type="number" value="${paidAmount > 0 ? paidAmount : ''}" placeholder="${u.totalPrice}"
+                  onblur="onUserPaidAmountInput('${u.userName}', ${u.totalPrice}, this.value)"
+                  class="w-20 text-center font-bold text-sm border border-slate-300 rounded-xl py-1 bg-white focus:ring-2 focus:ring-blue-500 outline-none">
+                
+                ${!isPaid && paidAmount > u.totalPrice ? `
+                  <button onclick="confirmChangeAndPay('${u.userName}', ${u.totalPrice})" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-2.5 py-1 rounded-lg text-xs shadow-xs transition animate-pulse">                     ✓ 找完 $${change}，按此結清
+                  </button>
+                ` : ''}
+              </div>
+
+              <!-- 勾選結清按鈕 -->
+              <label class="inline-flex items-center space-x-1.5 cursor-pointer select-none bg-slate-50 hover:bg-slate-100 border border-slate-200 px-3 py-1 rounded-xl transition">
+                <input type="checkbox" onchange="toggleUserPaidCheckbox('${u.userName}', ${u.totalPrice}, this.checked)" ${isPaid ? 'checked' : ''}
+                  class="w-4 h-4 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500 cursor-pointer">
+                <span class="text-xs font-semibold ${isPaid ? 'text-emerald-700 font-bold' : 'text-slate-600'}">結清標記</span>
+              </label>
+            </div>
+
+            <!-- 卡片下層：點購品項折疊抽屜 -->
+            ${isExpanded ? `
+              <div class="pt-2 border-t border-slate-100 space-y-1.5">
+                <div class="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">點購內容明細</div>
+                ${u.items.map(it => `
+                  <div class="flex items-center justify-between bg-slate-50 border border-slate-200/80 rounded-xl p-2 text-xs">
+                    <div class="truncate mr-2">
+                      <span class="text-blue-600 font-semibold">[${it.store_name || '未指定'}]</span>
+                      <span class="font-bold text-slate-800">${it.item_name}</span>
+                      ${it.note ? `<span class="text-amber-800 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded text-[10px] ml-1">${it.note}</span>` : ''}
+                      <span class="text-slate-500 font-bold ml-1.5">$${it.price}</span>
+                    </div>
+                    <div class="space-x-1 shrink-0">
+                      <button onclick="openEditModal(${it.id})" class="text-xs text-blue-600 hover:text-blue-800 font-semibold px-2 py-0.5 rounded bg-blue-50 border border-blue-200">修改</button>
+                      <button onclick="deleteOrder(${it.id})" class="text-xs text-red-600 hover:text-red-800 font-semibold px-2 py-0.5 rounded bg-red-50 border border-red-200">刪除</button>
+                    </div>
+                  </div>
+                `).join('')}
+              </div>
+            ` : ''}
+
+          </div>
+        `;
+      });
+
+      container.innerHTML = html;
+    }
+
+    // 展開 / 收合人員明細
+    function toggleUserExpand(userName) {
+      expandedUsers[userName] = !expandedUsers[userName];
+      renderUserCards(rawOrders);
+    }
+
+    // 實收金額輸入邏輯 (金額剛好才自動打勾；拿大鈔先不打勾)
+    async function onUserPaidAmountInput(userName, totalPrice, val) {
+      const paid = Number(val || 0);
+
+      // 規則 1：金額剛好相等，代表當場付清整數，自動打勾結清
+      if (paid === totalPrice) {
+        await updateOrderPaidStatus(userName, totalPrice, 1);
+      } 
+      // 規則 2：拿大鈔 (paid > totalPrice)，暫不打勾，記錄實收供介面提示「請找 $X」
+      else if (paid > totalPrice) {
+        await updateOrderPaidStatus(userName, paid, 0);
+      } 
+      // 規則 3：清空或少給，設為未結清
+      else {
+        await updateOrderPaidStatus(userName, paid, 0);
+      }
+      loadAdminData();
+    }
+
+    // 點擊「找完錢，按此結清」按鈕：將金額校正為應收金額並打勾
+    async function confirmChangeAndPay(userName, totalPrice) {
+      await updateOrderPaidStatus(userName, totalPrice, 1);
+      loadAdminData();
+    }
+
+    // 點擊結清勾選框
+    async function toggleUserPaidCheckbox(userName, totalPrice, isChecked) {
+      const targetAmount = isChecked ? totalPrice : 0;
+      await updateOrderPaidStatus(userName, targetAmount, isChecked ? 1 : 0);
+      loadAdminData();
+    }
+
+    // 呼叫後端依個人整批寫入
+    async function updateOrderPaidStatus(userName, paidAmount, isPaid) {
+      await fetch('/api/admin/user/paid', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userName, paidAmount, isPaid })
+      });
+    }
+
+    // 修改彈窗邏輯
+    function openEditModal(orderId) {
+      const order = rawOrders.find(o => o.id === orderId);
+      if (!order) return;
+
+      activeEditingOrderId = orderId;
+      document.getElementById('modalUserName').value = order.user_name;
+      document.getElementById('modalPrice').value = order.price;
+      document.getElementById('modalNote').value = order.note || '';
+
+      const originalItem = availableMenuItems.find(m => m.id === order.item_id);
+      const targetStoreId = originalItem ? originalItem.store_id : null;
+      const storeName = originalItem ? originalItem.store_name : (order.store_name || '');
+
+      document.getElementById('modalStoreIndicator').innerText = storeName ? `店家：${storeName}` : '';
+
+      let sameStoreItems = availableMenuItems;
+      if (targetStoreId) {
+        sameStoreItems = availableMenuItems.filter(m => m.store_id === targetStoreId);
+      }
+
+      const select = document.getElementById('modalMenuSelect');
+      let optHtml = '';
+      sameStoreItems.forEach(m => {
+        const isSel = (m.id === order.item_id) ? 'selected' : '';
+        optHtml += `<option value="${m.id}" data-price="${m.price}" ${isSel}>${m.item_name} - $${m.price}</option>`;
+      });
+      select.innerHTML = optHtml;
+      document.getElementById('editModal').classList.remove('hidden');
+    }
+
+    function onModalMenuChange() {
+      const select = document.getElementById('modalMenuSelect');
+      const opt = select.options[select.selectedIndex];
+      if (opt && opt.dataset.price) {
+        document.getElementById('modalPrice').value = opt.dataset.price;
+      }
+    }
+
+    function closeEditModal() {
+      document.getElementById('editModal').classList.add('hidden');
+      activeEditingOrderId = null;
+    }
+
+    async function saveOrderEdit() {
+      if (!activeEditingOrderId) return;
+      const itemId = Number(document.getElementById('modalMenuSelect').value);
+      const price = Number(document.getElementById('modalPrice').value);
+      const note = document.getElementById('modalNote').value.trim();
+
+      const res = await fetch('/api/admin/order/update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderId: activeEditingOrderId, itemId, price, note })
+      });
+      const json = await res.json();
+      if (json.success) {
+        closeEditModal();
+        loadAdminData();
+      } else {
+        alert(json.message || '更新失敗');
+      }
+    }
+
+    async function deleteOrder(orderId) {
+      if (!confirm('確定要刪除這筆餐點紀錄嗎？')) return;
+      const res = await fetch('/api/admin/order/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderId })
+      });
+      const json = await res.json();
+      if (json.success) {
+        loadAdminData();
+      } else {
+        alert(json.message || '刪除失敗');
+      }
+    }
+
+    async function resetAllOrders() {
+      if (!confirm('⚠️ 警告：這將清空目前所有的訂單紀錄，確定要重置嗎？')) return;
+      const res = await fetch('/api/admin/orders/reset', { method: 'POST' });
+      const json = await res.json();
+      alert(json.message || '已清空');
+      loadAdminData();
+    }
+
+    loadAdminData();
+  </script>
+</body>
+</html>
